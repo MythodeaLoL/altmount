@@ -48,48 +48,10 @@ const (
 // SendNZBFile sends an NZB file to an external SABnzbd instance
 // Returns the NZO ID assigned by SABnzbd, or an error
 // Priority values: "-100" (default), "-2" (paused), "-1" (low), "0" (normal), "1" (high), "2" (force)
-func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath string, category *string, priority *string) (string, error) {
+func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath string, category *string, priority *string, directory *string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-
-	// Validate inputs
-	if host == "" {
-		return "", fmt.Errorf("SABnzbd host cannot be empty")
-	}
-	if apiKey == "" {
-		return "", fmt.Errorf("SABnzbd API key cannot be empty")
-	}
-	if nzbPath == "" {
-		return "", fmt.Errorf("NZB file path cannot be empty")
-	}
-
-	// Check if file exists
-	fileInfo, err := os.Stat(nzbPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to stat NZB file: %w", err)
-	}
-	if fileInfo.IsDir() {
-		return "", fmt.Errorf("NZB path is a directory, not a file")
-	}
-
-	// Open the NZB file
-	file, err := os.Open(nzbPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open NZB file: %w", err)
-	}
-	defer file.Close()
-
-	// Create multipart form data
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	// Add the file
-	filename := filepath.Base(nzbPath)
-	part, err := writer.CreateFormFile("nzbfile", filename)
-	if err != nil {
-		return "", fmt.Errorf("failed to create form file: %w", err)
-	}
-
+--
 	if _, err := io.Copy(part, file); err != nil {
 		return "", fmt.Errorf("failed to copy file data: %w", err)
 	}
@@ -98,6 +60,13 @@ func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath s
 	if category != nil && *category != "" {
 		if err := writer.WriteField("cat", *category); err != nil {
 			return "", fmt.Errorf("failed to write category field: %w", err)
+		}
+	}
+
+	// Add directory if provided
+	if directory != nil && *directory != "" {
+		if err := writer.WriteField("dir", *directory); err != nil {
+			return "", fmt.Errorf("failed to write directory field: %w", err)
 		}
 	}
 

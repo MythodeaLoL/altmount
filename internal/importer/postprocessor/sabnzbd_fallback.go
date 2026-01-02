@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/sabnzbd"
@@ -31,16 +30,6 @@ func (c *Coordinator) AttemptFallback(ctx context.Context, item *database.Import
 	// Convert priority to SABnzbd format
 	priority := convertPriorityToSABnzbd(item.Priority)
 
-	// Calculate directory (subfolder) relative to the relative path (watch root)
-	var directory *string
-	if item.RelativePath != nil && *item.RelativePath != "" {
-		relDir, err := filepath.Rel(*item.RelativePath, filepath.Dir(item.NzbPath))
-		if err == nil && relDir != "." && relDir != "" {
-			dir := filepath.ToSlash(relDir)
-			directory = &dir
-		}
-	}
-
 	// Create client and send
 	client := sabnzbd.NewSABnzbdClient()
 	nzoID, err := client.SendNZBFile(
@@ -50,7 +39,6 @@ func (c *Coordinator) AttemptFallback(ctx context.Context, item *database.Import
 		item.NzbPath,
 		item.Category,
 		&priority,
-		directory,
 	)
 	if err != nil {
 		return err

@@ -229,9 +229,6 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	}
 	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
 
-	// Create directory watcher (Service implements WatchQueueAdder)
-	service.watcher = scanner.NewWatcher(service, configGetter)
-
 	// Create queue manager (Service implements queue.ItemProcessor interface)
 	service.queueManager = queue.NewManager(
 		queue.ManagerConfig{
@@ -352,9 +349,6 @@ func (s *Service) Stop(ctx context.Context) error {
 	if err := s.queueManager.Stop(ctx); err != nil {
 		s.log.WarnContext(ctx, "Error stopping queue manager", "error", err)
 	}
-
-	// Stop directory watcher
-	s.watcher.Stop()
 
 	// Cancel service context
 	s.cancel()
@@ -535,10 +529,10 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 			// This happens in Watch Directory imports where the file is physically inside the category folder
 			cleanVirtual := strings.Trim(filepath.ToSlash(virtualDir), "/")
 			cleanCategory := strings.Trim(filepath.ToSlash(categoryPath), "/")
-			
+
 			virtualParts := strings.Split(cleanVirtual, "/")
 			categoryParts := strings.Split(cleanCategory, "/")
-			
+
 			match := true
 			if len(virtualParts) < len(categoryParts) {
 				match = false
@@ -602,7 +596,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Generate new filename
+	// Generate new filename: <id>_<sanitized_filename>
 	filename := filepath.Base(item.NzbPath)
 	// sanitizeFilename is defined in service.go
 	newFilename := sanitizeFilename(filename)
@@ -738,18 +732,6 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
-	// Clean up the NZB file after successful processing
-	if err := os.Remove(item.NzbPath); err != nil {
-		s.log.WarnContext(ctx, "Failed to clean up NZB file after successful processing",
-			"queue_id", item.ID,
-			"nzb_path", item.NzbPath,
-			"error", err)
-		// Don't fail the entire process for cleanup failure
-	} else {
-		s.log.DebugContext(ctx, "Cleaned up NZB file after successful processing",
-			"queue_id", item.ID,
-			"nzb_path", item.NzbPath)
-	}
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }

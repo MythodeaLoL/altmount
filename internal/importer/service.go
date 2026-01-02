@@ -510,16 +510,33 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Determine the base path
+	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
 	}
 
+	// Calculate the virtual directory for metadata storage
+	virtualDir := s.calculateProcessVirtualDir(item, &basePath)
+
+	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
+	}
+
+	// Determine if allowed extensions override is needed
+	var allowedExtensionsOverride *[]string
+	if item.Category != nil && strings.ToLower(*item.Category) == "test" {
+		emptySlice := []string{}
+		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
+	}
+
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
+}
+
+func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
 	// Calculate initial virtual directory from physical/relative path
-	// For WatchDir: returns "/Category/Show" (preserving category)
-	// For NZBDav: returns "/root" (e.g. "/nzb")
-	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, basePath)
+	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
 
 	// If category is specified, resolve to configured directory path
 	if item.Category != nil && *item.Category != "" {
@@ -548,7 +565,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 			// If the category is NOT present in the virtual path (e.g. NZBDav import), 
 			// we must append it to ensure the file ends up in the correct category folder.
 			if !match {
-				basePath = filepath.Join(basePath, categoryPath)
+				*basePath = filepath.Join(*basePath, categoryPath)
 				virtualDir = filepath.Join(virtualDir, categoryPath)
 			}
 		}
@@ -575,19 +592,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
-
-	// Determine if allowed extensions override is needed
-	var allowedExtensionsOverride *[]string
-	if item.Category != nil && strings.ToLower(*item.Category) == "test" {
-		emptySlice := []string{}
-		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
-	}
-
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
+	return virtualDir
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory

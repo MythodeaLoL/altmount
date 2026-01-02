@@ -550,12 +550,28 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 			if !match {
 				basePath = filepath.Join(basePath, categoryPath)
 				virtualDir = filepath.Join(virtualDir, categoryPath)
-				// Ensure absolute virtual path
-				if !strings.HasPrefix(virtualDir, "/") {
-					virtualDir = "/" + virtualDir
-				}
-				virtualDir = filepath.ToSlash(virtualDir)
 			}
+		}
+	}
+
+	// Ensure absolute virtual path
+	if !strings.HasPrefix(virtualDir, "/") {
+		virtualDir = "/" + virtualDir
+	}
+	virtualDir = filepath.ToSlash(virtualDir)
+
+	// Prepend SABnzbd CompleteDir to virtualDir
+	cfg := s.configGetter()
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+		// Ensure completeDir is absolute for comparison
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+
+		if !strings.HasPrefix(virtualDir, completeDir) {
+			virtualDir = filepath.Join(completeDir, virtualDir)
+			virtualDir = filepath.ToSlash(virtualDir)
 		}
 	}
 

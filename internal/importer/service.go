@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -512,23 +513,58 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
-
-	// Determine the base path, incorporating category if present
+	// Determine the base path
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
 	}
 
+	// Calculate initial virtual directory from physical/relative path
+	// For WatchDir: returns "/Category/Show" (preserving category)
+	// For NZBDav: returns "/root" (e.g. "/nzb")
+	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, basePath)
+
 	// If category is specified, resolve to configured directory path
 	if item.Category != nil && *item.Category != "" {
 		categoryPath := s.buildCategoryPath(*item.Category)
 		if categoryPath != "" {
-			basePath = filepath.Join(basePath, categoryPath)
+			// Check if virtual path already starts with the category path
+			// This happens in Watch Directory imports where the file is physically inside the category folder
+			cleanVirtual := strings.Trim(filepath.ToSlash(virtualDir), "/")
+			cleanCategory := strings.Trim(filepath.ToSlash(categoryPath), "/")
+
+			virtualParts := strings.Split(cleanVirtual, "/")
+			categoryParts := strings.Split(cleanCategory, "/")
+
+			match := true
+			if len(virtualParts) < len(categoryParts) {
+				match = false
+			} else {
+				for i := range categoryParts {
+					if !strings.EqualFold(virtualParts[i], categoryParts[i]) {
+						match = false
+						break
+					}
+				}
+			}
+
+			// If the category is NOT present in the virtual path (e.g. NZBDav import), 
+			// we must append it to ensure the file ends up in the correct category folder.
+			if !match {
+				basePath = filepath.Join(basePath, categoryPath)
+				virtualDir = filepath.Join(virtualDir, categoryPath)
+				// Ensure absolute virtual path
+				if !strings.HasPrefix(virtualDir, "/") {
+					virtualDir = "/" + virtualDir
+				}
+				virtualDir = filepath.ToSlash(virtualDir)
+			}
 		}
+	}
+
+	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
 	}
 
 	// Determine if allowed extensions override is needed
@@ -538,7 +574,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory

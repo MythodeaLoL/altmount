@@ -3,7 +3,6 @@ package postprocessor
 import (
 	"context"
 	"os"
-	"path/filepath"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/sabnzbd"
